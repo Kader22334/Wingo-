@@ -1,0 +1,162 @@
+<meta name='viewport' content='width=device-width, initial-scale=1'/>
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Payment / Buy Key</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+<style>
+body{font-family:'Poppins',sans-serif;background:#071228;color:#eaf6ff;padding:18px;text-align:center}
+.wrap{max-width:560px;margin:20px auto}
+.card{background:#07203b;padding:16px;border-radius:10px;margin-bottom:12px;box-shadow:0 6px 20px rgba(0,0,0,0.4)}
+input,select,textarea,button{padding:10px;border-radius:8px;border:0;margin:8px;width:100%;box-sizing:border-box}
+input,textarea{background:#0c2744;color:#fff}
+button{background:#00c4ff;color:#001;font-weight:800;cursor:pointer}
+.muted{color:#9fb8cf;font-size:13px}
+.receiverBox{display:flex;justify-content:space-between;margin-bottom:8px}
+.receiverBox div{background:#0b2a45;padding:8px;border-radius:8px;width:48%;}
+.keyBox{background:#0b2a45;padding:10px;border-radius:8px;margin-bottom:8px;}
+.statusBox{padding:8px;border-radius:8px;margin-top:10px;font-weight:800}
+#backBtn{position:fixed;top:10px;right:10px;background:#ff4b4b;color:#fff;padding:8px 14px;border-radius:8px;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+
+<div id="backBtn" onclick="history.back()">⬅ Back ❌</div>
+
+<div class="wrap">
+  <h2>পেমেন্ট সাবমিশন — Coin Key কিনুন</h2>
+
+  <div class="card">
+    <div class="receiverBox">
+      <div id="bkashNumBox">💵Bkash: Loading...</div>
+      <div id="nagadNumBox">💵Nagad: Loading...</div>
+    </div>
+    <div class="keyBox" id="yourKeyBox">Your Key: —</div>
+    <div id="payStatus"></div>
+
+    <select id="method">
+      <option value="bkash">Bkash</option>
+      <option value="nagad">Nagad</option>
+    </select>
+    <input id="buyerName" placeholder="Your name">
+    <input id="phone" placeholder="Your phone number">
+    <input id="amount" type="number" placeholder="Amount (e.g., 100)">
+    <input id="txn" placeholder="transition ID (Block/Tx id)">
+    <input id="proofPhoto" type="file" accept="image/*">
+
+    <div style="display:flex;gap:8px">
+      <button onclick="submitPayment()">Submit Payment</button>
+      <button onclick="clearForm()" style="background:#ff6b6b">Clear</button>
+    </div>
+    <p class="muted">Admin verify করার পর এই পেজে আপনার Key Auto Active হবে</p>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-storage-compat.js"></script>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyDIeVHjyTKIyBfaFxPG8iK7S9SuRgjFbFk",
+  authDomain: "fir-dcce6.firebaseapp.com",
+  databaseURL: "https://fir-dcce6-default-rtdb.firebaseio.com",
+  projectId: "fir-dcce6",
+  storageBucket: "fir-dcce6.appspot.com",
+  messagingSenderId: "981371148475",
+  appId: "1:981371148475:web:de08536e57efb6c53fb19e",
+  measurementId: "G-PN4Z29V5SB"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const storage = firebase.storage();
+
+/* Load admin payment numbers */
+db.ref('settings/paymentReceivers').on('value', snap=>{
+  const val = snap.val() || {};
+  document.getElementById('bkashNumBox').innerText = '💵Bkash: ' + (val.bkash || 'Not set');
+  document.getElementById('nagadNumBox').innerText = '💵Nagad: ' + (val.nagad || 'Not set');
+});
+
+/* Check saved phone from LocalStorage (so refresh করলে পেন্ডিং থাকবে) */
+const savedPhone = localStorage.getItem("paymentPhone");
+if(savedPhone) watchAssignedKey(savedPhone);
+
+/* Watch Payment and Key */
+function watchAssignedKey(phone){
+  if(!phone) return;
+  localStorage.setItem("paymentPhone", phone); // Save phone for future visits
+
+  db.ref('payments').orderByChild('phone').equalTo(phone).on('value', snap=>{
+    if(!snap.exists()){
+      localStorage.removeItem("paymentPhone"); // If admin deleted payment → remove data
+      document.getElementById('yourKeyBox').innerText = 'Your Key: —';
+      document.getElementById('payStatus').innerHTML = '';
+      return;
+    }
+
+    const val = snap.val();
+    let keyText='—', statusText='', statusColor='';
+    Object.values(val).forEach(p=>{
+      if(p.status === 'confirmed'){
+        keyText = p.deliveredKey || '—';
+        statusText = '🟢 Active — Payment Approved'; statusColor = '#014d18';
+      }
+      else if(p.status === 'pending'){
+        statusText = '🟡 Pending — Waiting for admin confirmation'; statusColor = '#665e00';
+      }
+      else if(p.status === 'rejected'){
+        statusText = '🔴 Rejected — Payment Failed'; statusColor = '#5d0000';
+      }
+    });
+
+    document.getElementById('yourKeyBox').innerText='Your Key: '+keyText;
+    document.getElementById('payStatus').innerHTML = `<div class="statusBox" style="background:${statusColor}">${statusText}</div>`;
+  });
+}
+
+/* Submit payment */
+async function submitPayment(){
+  const name = document.getElementById('buyerName').value.trim();
+  const phone = document.getElementById('phone').value.trim();
+  const amount = parseFloat(document.getElementById('amount').value) || 0;
+  const txn = document.getElementById('txn').value.trim();
+  const method = document.getElementById('method').value;
+  const proof = document.getElementById('proofPhoto').files[0];
+
+  if(!name || !phone || !amount || !txn){
+    alert("⚠ সব ঘর পূরণ করুন!");
+    return;
+  }
+
+  try{
+    const ref = db.ref('payments').push();
+    let data = { name, phone, amount, method, txn, status:'pending', createdAt:Date.now() };
+
+    if(proof){
+      const ext = proof.name.split('.').pop();
+      const snap = await storage.ref(`paymentProofs/${ref.key}.${ext}`).put(proof);
+      data.proof = await snap.ref.getDownloadURL();
+    }
+
+    await ref.set(data);
+    alert("✔ Payment Submitted Successfully!");
+    watchAssignedKey(phone);     // পেন্ডিং স্ট্যাটাস সাথে সাথে দেখাবে
+    localStorage.setItem("paymentPhone", phone); // refresh করলেও থাকবে
+  } catch(e){
+    alert("Error: "+e.message);
+  }
+}
+
+function clearForm(){
+  document.getElementById('buyerName').value='';
+  document.getElementById('phone').value='';
+  document.getElementById('amount').value='';
+  document.getElementById('txn').value='';
+  document.getElementById('proofPhoto').value='';
+}
+</script>
+</body>
+  </html>
